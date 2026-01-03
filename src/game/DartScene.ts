@@ -1,5 +1,47 @@
 import * as THREE from "three";
 
+export const COLORS = {
+  // Board
+  BOARD_BASE: 0x141015,
+  RIM: 0x1b1b1b,
+  NUMBER_RING: 0x09090c,
+
+  // Segments
+  PIE_BLACK: 0x0d0d0d,
+  PIE_WHITE: 0xfae4b9,
+  RING_RED: 0xe72e2b,
+  RING_GREEN: 0x0d9537,
+
+  // Wires / UI
+  WIRE: 0xb7bcc0,
+  CROSSHAIR: 0xffffff,
+  MARKER: 0xffffff,
+} as const;
+
+export type Palette = typeof COLORS;
+
+type Ring =
+  | "MISS"
+  | "BULL_INNER"
+  | "BULL_OUTER"
+  | "SINGLE"
+  | "DOUBLE"
+  | "TRIPLE";
+
+export type HitResult = {
+  ring: Ring;
+  segmentIndex: number; // 0..19 (0 = 20 at top)
+  number: number; // 20,1,18,...
+  multiplier: 0 | 1 | 2 | 3;
+  total: number; // number * multiplier (bulls use 25/50)
+  label: string; // e.g. "T20", "D5", "25", "50", "MISS"
+};
+
+// Dartboard order clockwise from top (20)
+const BOARD_NUMBERS = [
+  20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5,
+] as const;
+
 type AimPhase = "aimAngle" | "aimRadius" | "locked";
 
 export class DartScene {
@@ -36,6 +78,57 @@ export class DartScene {
   private angleSpeed = 1.8; // radians/sec (we can scale difficulty later)
   private radiusSpeed = 1.2; // units/sec
   private radiusDir: 1 | -1 = 1;
+
+  // ---- Aim tuning (difficulty knobs) ----
+  // Speed ramping: speed increases the longer the player waits in each phase.
+  // Units:
+  //  - angle speeds are radians/second
+  //  - radius speeds are board-units/second (board radius is ~1.0 in your scene)
+  private angleSpeedMax = 6.0;
+  private angleSpeedRamp = 0.9; // +rad/sec each second spent aiming angle
+
+  private radiusSpeedMax = 4.0;
+  private radiusSpeedRamp = 0.9; // +units/sec each second spent aiming radius
+
+  // Allow the radius selector to go past the double ring so you can MISS.
+  // (BOARD_RADIUS is effectively the double outer edge in this scene)
+  private radiusMax = DartScene.BOARD_RADIUS * 1.18;
+
+  // Jitter (adds a little “hand shake” / instability to aiming)
+  private jitterThetaAmp = THREE.MathUtils.degToRad(4.0); // degrees -> radians
+  private jitterThetaFreq = 7.5; // Hz-ish
+  private jitterRAmp = DartScene.BOARD_RADIUS * 0.045;
+  private jitterRFreq = 9.0;
+
+  // JITTER PRESETS
+  /**
+  1) Rookie Hands (hard, but fair)
+    Use this as your default “start of run” if you want people to still hit singles.
+    jitterThetaAmp: 2.5°
+    jitterThetaFreq: 6.5
+    jitterRAmp: 0.030 * BOARD_RADIUS
+    jitterRFreq: 8.0
+
+  2) Shaky Tavern (roguelike spicy)
+    This is where bull/triples start feeling like gambling.
+    jitterThetaAmp: 4.0°
+    jitterThetaFreq: 7.5
+    jitterRAmp: 0.045 * BOARD_RADIUS
+    jitterRFreq: 9.0
+
+  3) Dumpster Fire (intentionally brutal start)
+    Only use this if your early-game is meant to be hilarious/punishing.
+    jitterThetaAmp: 6.5°
+    jitterThetaFreq: 8.5
+    jitterRAmp: 0.065 * BOARD_RADIUS
+    jitterRFreq: 10.0
+   */
+
+  private aimAngleTime = 0;
+  private aimRadiusTime = 0;
+  private t = 0;
+  private jitterSeedA = Math.random() * 1000;
+  private jitterSeedB = Math.random() * 1000;
 
   private lockTimer = 0;
 
@@ -82,7 +175,7 @@ export class DartScene {
       map: boardTex,
       roughness: 0.95,
       metalness: 0.05,
-      color: new THREE.Color(0x141015),
+      color: new THREE.Color(COLORS.BOARD_BASE),
     });
 
     this.board = new THREE.Mesh(geo, mat);
@@ -120,7 +213,7 @@ export class DartScene {
       new THREE.MeshStandardMaterial({
         roughness: 0.35,
         metalness: 0.55,
-        color: new THREE.Color(0x1b1b1b),
+        color: new THREE.Color(COLORS.RIM),
       })
     );
     rim.position.z = DartScene.BOARD_THICKNESS / 2 + 0.003;
@@ -133,16 +226,14 @@ export class DartScene {
     const segSize = (Math.PI * 2) / SEGMENTS;
 
     // Dartboard order (clockwise from top) - for later when we render numbers/scoring
-    const numbers = [
-      20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5,
-    ];
+    const numbers = [...BOARD_NUMBERS];
     void numbers; // silence unused for now
 
     // Colors (grimy versions)
-    const COL_BLACK = 0x1a1a1d;
-    const COL_WHITE = 0xe4ded3;
-    const COL_RED = 0x8b1111;
-    const COL_GREEN = 0x0f5a2a;
+    const COL_BLACK = COLORS.PIE_BLACK;
+    const COL_WHITE = COLORS.PIE_WHITE;
+    const COL_RED = COLORS.RING_RED;
+    const COL_GREEN = COLORS.RING_GREEN;
 
     // Single areas: bull outer -> triple inner, and triple outer -> double inner
     const rSingleInner0 = DartScene.R_BULL_OUTER;
@@ -206,7 +297,7 @@ export class DartScene {
     const numRing = new THREE.Mesh(
       new THREE.RingGeometry(DartScene.R_NUM_INNER, DartScene.R_NUM_OUTER, 160),
       new THREE.MeshStandardMaterial({
-        color: new THREE.Color(0x09090c),
+        color: new THREE.Color(COLORS.NUMBER_RING),
         roughness: 0.6,
         metalness: 0.05,
         transparent: true,
@@ -281,7 +372,7 @@ export class DartScene {
     // Crosshair + Marker
     // ---------------------------
     const crossMat = new THREE.MeshBasicMaterial({
-      color: 0xff3b1f,
+      color: COLORS.CROSSHAIR,
       transparent: true,
       opacity: 1,
       depthTest: false,
@@ -289,14 +380,14 @@ export class DartScene {
     });
 
     this.crosshair = new THREE.Mesh(
-      new THREE.RingGeometry(0.05, 0.08, 20),
+      new THREE.RingGeometry(0.067, 0.076, 32),
       crossMat
     );
     this.crosshair.renderOrder = 999;
     this.boardGroup.add(this.crosshair);
 
     const markerMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
+      color: COLORS.MARKER,
       transparent: true,
       opacity: 1,
       depthTest: false,
@@ -304,7 +395,7 @@ export class DartScene {
     });
 
     this.marker = new THREE.Mesh(
-      new THREE.CircleGeometry(0.025, 24),
+      new THREE.CircleGeometry(0.015, 24),
       markerMat
     );
     this.marker.renderOrder = 998;
@@ -319,6 +410,7 @@ export class DartScene {
 
   /** Call each frame */
   update(dt: number) {
+    this.t += dt;
     // Basic “locked” pause then reset so you can keep testing
     if (this.phase === "locked") {
       this.lockTimer -= dt;
@@ -328,7 +420,14 @@ export class DartScene {
 
     if (this.phase === "aimAngle") {
       // Clockwise rotation: subtract theta
-      this.theta -= this.angleSpeed * dt;
+      this.aimAngleTime += dt;
+      this.aimRadiusTime = 0;
+
+      const angleSpeedNow = Math.min(
+        this.angleSpeedMax,
+        this.angleSpeed + this.angleSpeedRamp * this.aimAngleTime
+      );
+      this.theta -= angleSpeedNow * dt;
 
       // Keep theta bounded
       if (this.theta < -Math.PI) this.theta += Math.PI * 2;
@@ -339,10 +438,17 @@ export class DartScene {
 
     if (this.phase === "aimRadius") {
       // Move radius in/out between bull(0) and double(outer edge)
-      this.r += this.radiusDir * this.radiusSpeed * dt;
+      this.aimRadiusTime += dt;
+      this.aimAngleTime = 0;
 
-      if (this.r >= DartScene.BOARD_RADIUS) {
-        this.r = DartScene.BOARD_RADIUS;
+      const radiusSpeedNow = Math.min(
+        this.radiusSpeedMax,
+        this.radiusSpeed + this.radiusSpeedRamp * this.aimRadiusTime
+      );
+      this.r += this.radiusDir * radiusSpeedNow * dt;
+
+      if (this.r >= this.radiusMax) {
+        this.r = this.radiusMax;
         this.radiusDir = -1;
       } else if (this.r <= 0) {
         this.r = 0;
@@ -358,23 +464,29 @@ export class DartScene {
     if (!this.isReady) return;
 
     if (this.phase === "aimAngle") {
-      this.lockedTheta = this.theta;
+      this.lockedTheta = this.theta + this.getThetaJitter();
+      this.aimAngleTime = 0;
       this.phase = "aimRadius";
       return;
     }
 
     if (this.phase === "aimRadius") {
-      this.lockedR = this.r;
+      this.lockedR = THREE.MathUtils.clamp(
+        this.getRWithJitter(this.r),
+        0,
+        this.radiusMax
+      );
+      this.aimRadiusTime = 0;
       this.phase = "locked";
-
-      if (!this.marker) return;
 
       const p = this.polarToBoardPoint(this.lockedTheta, this.lockedR);
       this.marker.position.set(p.x, p.y, this.zMarker);
       this.marker.visible = true;
 
-      // Hold marker briefly then reset
-      this.lockTimer = 0.6;
+      const hit = this.scoreFromPolar(this.lockedTheta, this.lockedR);
+      console.log("[HIT]", hit.label, "=", hit.total, hit);
+
+      this.lockTimer = 1.5;
     }
   }
 
@@ -389,8 +501,12 @@ export class DartScene {
     // Start next aim at top again (feel free to randomize later)
     this.theta = Math.PI / 2;
     this.lockedTheta = this.theta;
+
     this.r = DartScene.BOARD_RADIUS * 0.85;
     this.radiusDir = 1;
+
+    this.aimAngleTime = 0;
+    this.aimRadiusTime = 0;
 
     this.updateCrosshairPosition();
   }
@@ -398,13 +514,30 @@ export class DartScene {
   private updateCrosshairPosition() {
     if (!this.crosshair) return;
 
-    const t = this.phase === "aimRadius" ? this.lockedTheta : this.theta;
-    const p = this.polarToBoardPoint(t, this.r);
+    const baseTheta =
+      this.phase === "aimRadius" ? this.lockedTheta : this.theta;
+    const theta = baseTheta + this.getThetaJitter();
+    const r = this.getRWithJitter(this.r);
+    const p = this.polarToBoardPoint(theta, r);
 
     this.crosshair.position.set(p.x, p.y, this.zCrosshair);
 
     // Rotate crosshair slightly for vibe (optional)
     this.crosshair.rotation.z += 0.02;
+  }
+
+  private getThetaJitter() {
+    // Smooth-ish jitter using sin waves (no per-frame randomness/flicker)
+    return (
+      Math.sin(this.t * this.jitterThetaFreq + this.jitterSeedA) *
+      this.jitterThetaAmp
+    );
+  }
+
+  private getRWithJitter(r: number) {
+    const jr =
+      Math.sin(this.t * this.jitterRFreq + this.jitterSeedB) * this.jitterRAmp;
+    return r + jr;
   }
 
   private polarToBoardPoint(theta: number, r: number) {
@@ -413,6 +546,95 @@ export class DartScene {
     const x = r * Math.cos(theta);
     const y = r * Math.sin(theta);
     return { x, y };
+  }
+
+  private wrapAngle0To2Pi(a: number) {
+    const twoPi = Math.PI * 2;
+    a = a % twoPi;
+    return a < 0 ? a + twoPi : a;
+  }
+
+  /**
+   * Convert theta -> segment index (0..19)
+   * Matches your board build: center = PI/2 - i*segSize (i=0 is 20 at top)
+   */
+  private segmentIndexFromTheta(theta: number) {
+    const segSize = (Math.PI * 2) / 20;
+
+    // delta is how far clockwise from top (PI/2) we are
+    const delta = this.wrapAngle0To2Pi(Math.PI / 2 - theta);
+
+    // add half-segment so boundary angles round to nearest segment
+    const i = Math.floor((delta + segSize / 2) / segSize) % 20;
+    return i;
+  }
+
+  private scoreFromPolar(theta: number, r: number): HitResult {
+    // Miss if outside board (beyond double outer)
+    if (r > DartScene.R_DOUBLE_OUTER) {
+      return {
+        ring: "MISS",
+        segmentIndex: -1,
+        number: 0,
+        multiplier: 0,
+        total: 0,
+        label: "MISS",
+      };
+    }
+
+    // Bulls
+    if (r <= DartScene.R_BULL_INNER) {
+      return {
+        ring: "BULL_INNER",
+        segmentIndex: -1,
+        number: 50,
+        multiplier: 1,
+        total: 50,
+        label: "50",
+      };
+    }
+
+    if (r <= DartScene.R_BULL_OUTER) {
+      return {
+        ring: "BULL_OUTER",
+        segmentIndex: -1,
+        number: 25,
+        multiplier: 1,
+        total: 25,
+        label: "25",
+      };
+    }
+
+    const segIndex = this.segmentIndexFromTheta(theta);
+    const num = BOARD_NUMBERS[segIndex];
+
+    // Ring / multiplier
+    let ring: Ring = "SINGLE";
+    let mult: 0 | 1 | 2 | 3 = 1;
+
+    if (r >= DartScene.R_DOUBLE_INNER && r <= DartScene.R_DOUBLE_OUTER) {
+      ring = "DOUBLE";
+      mult = 2;
+    } else if (r >= DartScene.R_TRIPLE_INNER && r <= DartScene.R_TRIPLE_OUTER) {
+      ring = "TRIPLE";
+      mult = 3;
+    } else {
+      ring = "SINGLE";
+      mult = 1;
+    }
+
+    const total = num * mult;
+    const prefix = ring === "DOUBLE" ? "D" : ring === "TRIPLE" ? "T" : "";
+    const label = `${prefix}${num}`;
+
+    return {
+      ring,
+      segmentIndex: segIndex,
+      number: num,
+      multiplier: mult,
+      total,
+      label,
+    };
   }
 
   private makeRing(inner: number, outer: number, color: number) {
@@ -461,7 +683,7 @@ export class DartScene {
     const geo = new THREE.BufferGeometry().setFromPoints(pts);
 
     const mat = new THREE.LineBasicMaterial({
-      color: 0xb7bcc0, // steel, not white
+      color: COLORS.WIRE,
       transparent: true, // OK for lines
       opacity: 0.75, // don't overpower wedges
       toneMapped: false,
@@ -520,7 +742,7 @@ export class DartScene {
     ]);
 
     const mat = new THREE.LineBasicMaterial({
-      color: 0xb7bcc0, // steel, not white
+      color: COLORS.WIRE, // steel, not white
       transparent: true, // OK for lines
       opacity: 0.75, // don't overpower wedges
       toneMapped: false,
