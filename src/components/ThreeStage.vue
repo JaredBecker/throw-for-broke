@@ -5,6 +5,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import * as THREE from "three";
+import { DartScene } from "@/game/DartScene";
 
 const mountEl = ref<HTMLDivElement | null>(null);
 
@@ -12,6 +13,8 @@ let renderer: THREE.WebGLRenderer | null = null;
 let scene: THREE.Scene | null = null;
 let camera: THREE.PerspectiveCamera | null = null;
 let raf = 0;
+
+let dartScene: DartScene | null = null;
 
 function getSize() {
   const el = mountEl.value!;
@@ -27,6 +30,12 @@ function resize() {
   renderer.setSize(w, h, false);
 }
 
+function confirm() {
+  dartScene?.confirm();
+}
+
+defineExpose({ confirm });
+
 onMounted(() => {
   if (!mountEl.value) return;
 
@@ -40,22 +49,18 @@ onMounted(() => {
 
   // Camera
   camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-  camera.position.set(0, 0, 6);
+  camera.position.set(0, 0, 3.2);
 
-  // Basic lights (so materials look nice)
+  // Lights
   const ambient = new THREE.AmbientLight(0xffffff, 0.7);
   scene.add(ambient);
 
-  const dir = new THREE.DirectionalLight(0xffffff, 1.0);
-  dir.position.set(3, 5, 6);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.1);
+  dir.position.set(2, 3, 4);
   scene.add(dir);
 
-  // Temporary visual so you know it’s working (we’ll replace with dartboard)
-  const cube = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.1 })
-  );
-  scene.add(cube);
+  // Our game scene/controller
+  dartScene = new DartScene(scene, camera);
 
   // Start
   resize();
@@ -67,8 +72,7 @@ onMounted(() => {
     raf = requestAnimationFrame(tick);
 
     const dt = clock.getDelta();
-    cube.rotation.y += dt * 0.7;
-    cube.rotation.x += dt * 0.4;
+    dartScene?.update(dt);
 
     renderer!.render(scene!, camera!);
   };
@@ -80,7 +84,6 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", resize);
   if (raf) cancelAnimationFrame(raf);
 
-  // Dispose renderer + remove canvas
   if (renderer) {
     renderer.dispose();
     renderer.domElement.remove();
@@ -89,6 +92,7 @@ onBeforeUnmount(() => {
   renderer = null;
   scene = null;
   camera = null;
+  dartScene = null;
 });
 </script>
 

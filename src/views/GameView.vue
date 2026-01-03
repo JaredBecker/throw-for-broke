@@ -1,16 +1,39 @@
 <template>
-  <main class="game">
-    <ThreeStage class="canvas" />
+  <main class="game" @click="onConfirm">
+    <ThreeStage ref="stage" class="canvas" />
 
     <div class="hud">
       <h1>Run</h1>
-      <p>Next: dartboard + crosshair timing mechanic</p>
+      <p>Click / Space: lock angle, then lock radius</p>
     </div>
   </main>
 </template>
 
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import ThreeStage from "@/components/ThreeStage.vue";
+
+const stage = ref<InstanceType<typeof ThreeStage> | null>(null);
+
+const onConfirm = () => {
+  stage.value?.confirm();
+};
+
+const onKeyDown = (e: KeyboardEvent) => {
+  if (e.code !== "Space") return;
+
+  // prevent page scroll
+  e.preventDefault();
+
+  // ignore if user is typing in an input later
+  const tag = (e.target as HTMLElement | null)?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+  onConfirm();
+};
+
+onMounted(() => window.addEventListener("keydown", onKeyDown));
+onBeforeUnmount(() => window.removeEventListener("keydown", onKeyDown));
 </script>
 
 <style scoped>
@@ -22,13 +45,11 @@ import ThreeStage from "@/components/ThreeStage.vue";
   overflow: hidden;
 }
 
-/* Three canvas fills the screen */
 .canvas {
   position: absolute;
   inset: 0;
 }
 
-/* Simple HUD overlay */
 .hud {
   position: absolute;
   top: 16px;
