@@ -36,11 +36,13 @@ function confirm() {
 
 defineExpose({ confirm });
 
-onMounted(() => {
+onMounted(async () => {
   if (!mountEl.value) return;
 
   // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   mountEl.value.appendChild(renderer.domElement);
 
@@ -52,12 +54,20 @@ onMounted(() => {
   camera.position.set(0, 0, 3.2);
 
   // Lights
-  const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.65);
   scene.add(ambient);
 
-  const dir = new THREE.DirectionalLight(0xffffff, 1.1);
-  dir.position.set(2, 3, 4);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.25);
+  dir.position.set(1.8, 2.6, 3.5);
   scene.add(dir);
+
+  // Subtle red under glow for ominous vibe
+  const red = new THREE.PointLight(0xff2a18, 0.6, 10);
+  red.position.set(-1.5, -1.2, 2.2);
+  scene.add(red);
+
+  // Wait for fonts to load to prevent layout shift
+  await (document as any).fonts?.ready;
 
   // Our game scene/controller
   dartScene = new DartScene(scene, camera);
