@@ -1,27 +1,45 @@
 <template>
-  <main class="page">
-    <h1>Game View</h1>
-    <p>Next up: Three.js scene goes here.</p>
+  <main class="game">
+    <ThreeStage class="canvas" />
 
-    <RouterLink to="/" class="link">Back to Home</RouterLink>
+    <div class="hud">
+      <h1>Run</h1>
+      <p>Next: dartboard + crosshair timing mechanic</p>
+    </div>
   </main>
 </template>
 
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import ThreeStage from "@/components/ThreeStage.vue";
+</script>
 
 <style scoped>
-.page {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  gap: 12px;
+.game {
+  position: relative;
+  width: 100%;
+  height: 100vh;
   background: #080a10;
-  color: white;
-  text-align: center;
-  padding: 24px;
+  overflow: hidden;
 }
-.link {
-  color: rgba(255, 255, 255, 0.75);
-  text-decoration: underline;
+
+/* Three canvas fills the screen */
+.canvas {
+  position: absolute;
+  inset: 0;
+}
+
+/* Simple HUD overlay */
+.hud {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
 }
 </style>

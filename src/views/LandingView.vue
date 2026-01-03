@@ -10,13 +10,13 @@
 
       <div class="actions">
         <button class="btn btn--primary" type="button" @click="onStart">
-          Start Run
+          <span class="btn__label">Start Run</span>
         </button>
         <button class="btn btn--secondary" type="button" @click="onHowTo">
-          How to Play
+          <span class="btn__label">How to Play</span>
         </button>
         <button class="btn btn--secondary" type="button" @click="onSettings">
-          Settings
+          <span class="btn__label">Settings</span>
         </button>
       </div>
 
