@@ -1,48 +1,6 @@
+import { AimPhase, BOARD_NUMBERS, COLORS, HitResult, Ring } from "@/models";
+import { useRunStore } from "@/stores/runStore";
 import * as THREE from "three";
-
-export const COLORS = {
-  // Board
-  BOARD_BASE: 0x141015,
-  RIM: 0x1b1b1b,
-  NUMBER_RING: 0x09090c,
-
-  // Segments
-  PIE_BLACK: 0x0d0d0d,
-  PIE_WHITE: 0xfae4b9,
-  RING_RED: 0xe72e2b,
-  RING_GREEN: 0x0d9537,
-
-  // Wires / UI
-  WIRE: 0xb7bcc0,
-  CROSSHAIR: 0xffffff,
-  MARKER: 0xffffff,
-} as const;
-
-export type Palette = typeof COLORS;
-
-type Ring =
-  | "MISS"
-  | "BULL_INNER"
-  | "BULL_OUTER"
-  | "SINGLE"
-  | "DOUBLE"
-  | "TRIPLE";
-
-export type HitResult = {
-  ring: Ring;
-  segmentIndex: number; // 0..19 (0 = 20 at top)
-  number: number; // 20,1,18,...
-  multiplier: 0 | 1 | 2 | 3;
-  total: number; // number * multiplier (bulls use 25/50)
-  label: string; // e.g. "T20", "D5", "25", "50", "MISS"
-};
-
-// Dartboard order clockwise from top (20)
-const BOARD_NUMBERS = [
-  20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5,
-] as const;
-
-type AimPhase = "aimAngle" | "aimRadius" | "locked";
 
 export class DartScene {
   // Board “game units”
@@ -145,6 +103,8 @@ export class DartScene {
   // Small z offsets to avoid z-fighting
   private readonly zCrosshair = 0.08;
   private readonly zMarker = 0.07;
+
+  private runStore = useRunStore();
 
   constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
     this.scene = scene;
@@ -484,6 +444,8 @@ export class DartScene {
       this.marker.visible = true;
 
       const hit = this.scoreFromPolar(this.lockedTheta, this.lockedR);
+      this.runStore.submitThrow(hit);
+
       console.log("[HIT]", hit.label, "=", hit.total, hit);
 
       this.lockTimer = 1.5;

@@ -1,37 +1,83 @@
+import { HitResult, RunPhase } from "@/models";
 import { defineStore } from "pinia";
-
-export type AimPhase = "aimAngle" | "aimRadius" | "throwing";
 
 export const useRunStore = defineStore("run", {
   state: () => ({
-    phase: "aimAngle" as AimPhase,
-    throwsLeft: 3,
     round: 1,
-    targetScore: 101,
-    scoreThisRound: 0,
-    lockedTheta: null as number | null,
-    lockedR: null as number | null,
+    dartsPerRound: 9,
+    dartsLeft: 9,
+    targetScore: 75,
+    throws: [] as HitResult[],
+    coins: 0,
+    phase: "aiming" as RunPhase,
   }),
+
+  getters: {
+    totalScore: (state) => state.throws.reduce((sum, t) => sum + t.total, 0),
+    scoreNeeded: (state) =>
+      Math.max(
+        0,
+        state.targetScore - state.throws.reduce((s, t) => s + t.total, 0)
+      ),
+    scoreOver: (state) =>
+      Math.max(
+        0,
+        state.throws.reduce((s, t) => s + t.total, 0) - state.targetScore
+      ),
+  },
+
   actions: {
+    submitThrow(hit: HitResult) {
+      if (this.phase !== "aiming") return;
+      if (this.dartsLeft <= 0) return;
+
+      this.throws.unshift(hit);
+      this.dartsLeft--;
+
+      if (this.dartsLeft === 0) {
+        const total = this.throws.reduce((s, t) => s + t.total, 0);
+
+        if (total >= this.targetScore) {
+          this.coins += total - this.targetScore;
+          this.phase = "round-complete";
+        } else {
+          this.phase = "run-over";
+        }
+      }
+    },
+
+    resolveRound() {
+      const total = this.totalScore;
+
+      if (total >= this.targetScore) {
+        this.coins += total - this.targetScore;
+        this.state = "round-complete";
+      } else {
+        this.state = "run-over";
+      }
+    },
+
+    startNextRound() {
+      if (this.phase !== "round-complete") return;
+
+      this.round += 1;
+
+      // pick your ramp. this is a decent start:
+      this.targetScore = Math.round(this.targetScore * 1.25);
+
+      this.throws = [];
+      this.dartsLeft = this.dartsPerRound;
+      this.phase = "aiming";
+    },
+
     resetRun() {
-      this.phase = "aimAngle";
-      this.throwsLeft = 3;
       this.round = 1;
-      this.targetScore = 101;
-      this.scoreThisRound = 0;
-      this.lockedTheta = null;
-      this.lockedR = null;
-    },
-    setPhase(phase: AimPhase) {
-      this.phase = phase;
-    },
-    lockAngle(theta: number) {
-      this.lockedTheta = theta;
-      this.phase = "aimRadius";
-    },
-    lockRadius(r: number) {
-      this.lockedR = r;
-      this.phase = "throwing";
+      this.targetScore = 75; // set your desired starting target
+      this.dartsPerRound = 9;
+      this.dartsLeft = this.dartsPerRound;
+      this.throws = [];
+      this.coins = 0;
+      this.phase = "aiming";
     },
   },
 });
